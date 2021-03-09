@@ -76,7 +76,7 @@ private:
   static void setFlag();
   bool ready = false;
   SPIClass spi;
-  const char* TEST_STRING = "TinyGS-test "; // make sure this always start with "TinyGS-test"!!!
+  const char* TEST_STRING = "TinyGS-test de AG7XO "; // make sure this always start with "TinyGS-test"!!!
 
   double _atof(const char* buff, size_t length);
   int _atoi(const char* buff, size_t length);
