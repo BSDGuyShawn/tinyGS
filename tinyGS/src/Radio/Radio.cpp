@@ -108,6 +108,7 @@ int16_t Radio::begin()
 
     if (board.L_SX127X)
     {
+      Log::console(PSTR("Board Type :: %u"), board.L_SX127X);
       state = ((SX1278*)lora)->begin(m.frequency, m.bw, m.sf, m.cr, m.sw, m.power,m.preambleLength,m.gain);
       if (m.fldro == 2)
         ((SX1278*)lora)->autoLDRO();
@@ -118,6 +119,7 @@ int16_t Radio::begin()
     }
     else
     {
+      Log::console(PSTR("SX1268"));
       state = ((SX1268*)lora)->begin(m.frequency, m.bw, m.sf, m.cr, m.sw, m.power, m.preambleLength, board.L_TCXO_V);
       if (m.fldro == 2)
         ((SX1268*)lora)->autoLDRO();
