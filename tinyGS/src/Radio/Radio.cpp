@@ -272,6 +272,31 @@ uint16_t Radio::sendTestPacket()
   return sendTx((uint8_t*)TEST_STRING, strlen(TEST_STRING));
 }
 
+uint16_t Radio::sendSatellitePacket()
+{
+  int16_t state = 0;
+  uint8_t modemStatus = 0;
+
+  char satelliteString[100];
+
+  sprintf(satelliteString, "TinyGS-test %s,LORA ACTIVE: 73 de AG7XO!", status.modeminfo.satellite);
+
+  if (ConfigManager::getInstance().getBoardConfig().L_SX127X) {
+      state = ((SX1278*)lora)->setOutputPower(20);
+      modemStatus = ((SX1278*)lora)->getModemStatus();
+      Log::console(PSTR("SX1278"));
+    } else {
+      state = ((SX1268*)lora)->setOutputPower(22);
+      modemStatus = ((SX1268*)lora)->getStatus();
+      Log::console(PSTR("SX1268"));
+    }
+
+  Log::console(PSTR("Output Power State - %d\nModem Status - %d"), state, modemStatus);
+
+  Log::console(PSTR("%s Send - Satellite @ %ddBm"), status.modeminfo.satellite, status.modeminfo.power);
+  return sendTx((uint8_t*)satelliteString, strlen(satelliteString));
+}
+
 uint8_t Radio::listen()
 {
   // check if the flag is set (received interruption)

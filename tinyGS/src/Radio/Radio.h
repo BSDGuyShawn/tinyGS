@@ -66,6 +66,7 @@ public:
   int16_t remote_SPIreadRegister(char* payload, size_t payload_len);
   uint16_t sendTx(uint8_t* data, size_t length);
   uint16_t sendTestPacket();
+  uint16_t sendSatellitePacket();
 
   
    
@@ -76,7 +77,7 @@ private:
   static void setFlag();
   bool ready = false;
   SPIClass spi;
-  const char* TEST_STRING = "TinyGS-test de AG7XO "; // make sure this always start with "TinyGS-test"!!!
+  const char* TEST_STRING = "TinyGS-test 73 de AG7XO!"; // make sure this always start with "TinyGS-test"!!!
 
   double _atof(const char* buff, size_t length);
   int _atoi(const char* buff, size_t length);

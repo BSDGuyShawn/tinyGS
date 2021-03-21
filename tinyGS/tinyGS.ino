@@ -110,8 +110,13 @@ void printLocalTime();
 // Global status
 Status status;
 
+// Last LOG_LEVEL
+Log::LoggingLevels lastLogLevel = (Log::LoggingLevels)0;
+
 void printControls();
 void switchTestmode();
+void switchLogLevel();
+
 
 void ntp_cb (NTPEvent_t e)
 {
@@ -277,7 +282,11 @@ void loop() {
     }
 
     // process serial command
+    static long lastTestPacketTime = 0;
     switch(serialCmd) {
+      case 'l':
+        switchLogLevel();
+        break;
       case 'e':
         configManager.resetAllConfig();
         ESP.restart();
@@ -295,7 +304,6 @@ void loop() {
           break;
         }
 
-        static long lastTestPacketTime = 0;
         if (millis() - lastTestPacketTime < 20*1000)
         {
           Log::console(PSTR("Please wait a few seconds to send another test packet."));
@@ -305,6 +313,23 @@ void loop() {
         radio.sendTestPacket();
         lastTestPacketTime = millis();
         Log::console(PSTR("Sending test packet to nearby stations!"));
+        break;
+      case 's':
+        if (!configManager.getAllowTx())
+        {
+          Log::console(PSTR("Radio transmission is not allowed by config! Check your config on the web panel and make sure transmission is allowed by local regulations"));
+          break;
+        }
+
+        if (millis() - lastTestPacketTime < 20*1000)
+        {
+          Log::console(PSTR("Please wait a few seconds to send another test packet."));
+          break;
+        }
+        
+        radio.sendSatellitePacket();
+        lastTestPacketTime = millis();
+        Log::console(PSTR("Sending packet to Satellite!"));
         break;
       default:
         Log::console(PSTR("Unknown command: %c"), serialCmd);
@@ -350,6 +375,13 @@ void switchTestmode()
   }
 }
 
+void switchLogLevel()
+{  
+  lastLogLevel == Log::LOG_LEVEL_DEBUG ? lastLogLevel = Log::LOG_LEVEL_NONE : lastLogLevel = Log::LOG_LEVEL_DEBUG;
+  Log::setLogLevel(lastLogLevel);
+  Log::console(PSTR("Changed Log Level %d"), lastLogLevel);
+}
+
 void printLocalTime()
 {
   struct tm timeinfo;
@@ -365,9 +397,11 @@ void printLocalTime()
 void printControls()
 {
   Log::console(PSTR("------------- Controls -------------"));
+  Log::console(PSTR("l - toggle LOG_LEVEL_DEBUG"));
   Log::console(PSTR("t - change the test mode and restart"));
   Log::console(PSTR("e - erase board config and reset"));
   Log::console(PSTR("b - reboot the board"));
   Log::console(PSTR("p - send test packet to nearby stations (to check transmission)"));
+  Log::console(PSTR("s - send packet to Satellite"));
   Log::console(PSTR("------------------------------------"));
 }
