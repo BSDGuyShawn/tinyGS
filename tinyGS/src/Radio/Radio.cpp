@@ -278,7 +278,7 @@ int16_t Radio::sendTestPacket()
   return sendTx((uint8_t*)TEST_STRING, strlen(TEST_STRING));
 }
 
-uint16_t Radio::sendSatellitePacket()
+int16_t Radio::sendSatellitePacket()
 {
   int16_t state = 0;
   uint8_t modemStatus = 0;
