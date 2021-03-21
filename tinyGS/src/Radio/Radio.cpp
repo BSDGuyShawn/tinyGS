@@ -25,6 +25,7 @@
 
 bool received = false;
 bool eInterrupt = true;
+bool noisyInterrupt = false;
 
 Radio::Radio()
 : spi(VSPI)
@@ -88,7 +89,7 @@ int16_t Radio::begin()
 
   ModemInfo& m = status.modeminfo;
   m.modem_mode = doc["mode"].as<String>();
-  m.satellite = doc["sat"].as<String>();
+  strcpy(m.satellite, doc["sat"].as<char*>());
   m.NORAD = doc["NORAD"];
 
   int16_t state = 0;
@@ -173,8 +174,8 @@ int16_t Radio::begin()
 
     if (ConfigManager::getInstance().getBoardConfig().L_SX127X)
       state = ((SX1278*)lora)->_mod->SPIsetRegValue((regValue>>8)&0x0F, regValue&0x0F, (regMask>>16)&0x0F, (regMask>>8)&0x0F, regMask&0x0F);
-    else
-      state = ((SX1268*)lora)->_mod->SPIsetRegValue((regValue>>8)&0x0F, regValue&0x0F, (regMask>>16)&0x0F, (regMask>>8)&0x0F, regMask&0x0F);
+   // else
+   //   state = ((SX1268*)lora)->_mod->SPIsetRegValue((regValue>>8)&0x0F, regValue&0x0F, (regMask>>16)&0x0F, (regMask>>8)&0x0F, regMask&0x0F);
   }
   
   
@@ -184,7 +185,7 @@ int16_t Radio::begin()
   } 
   else
   {
-    Log::console(PSTR("failed, code %u"), state);
+    Log::console(PSTR("failed, code %d"), state);
     return state;
   }
 
@@ -201,7 +202,7 @@ int16_t Radio::begin()
   }
 
   // start listening for LoRa packets
-  Log::console(PSTR("[SX12x8] Starting to listen ... "));
+  Log::console(PSTR("[SX12x8] Starting to listen to %s"), m.satellite);
   if (board.L_SX127X)
     state = ((SX1278*)lora)->startReceive();
   else
@@ -213,7 +214,7 @@ int16_t Radio::begin()
   } 
   else
   {
-    Log::console(PSTR("failed, code %u\nGo to the config panel (%s) and check if the board selected matches your hardware."), state, WiFi.localIP().toString());
+    Log::console(PSTR("failed, code %d\nGo to the config panel (%s) and check if the board selected matches your hardware."), state, WiFi.localIP().toString());
     return state;
   }
 
@@ -223,7 +224,10 @@ int16_t Radio::begin()
 
 void Radio::setFlag()
 {
-  if(!eInterrupt)
+  if (received || !eInterrupt)
+    noisyInterrupt = true;
+
+  if (!eInterrupt)
     return;
 
   received = true;
@@ -239,16 +243,17 @@ void Radio::disableInterrupt()
   eInterrupt = false;
 }
 
-uint16_t Radio::sendTx(uint8_t* data, size_t length)
+int16_t Radio::sendTx(uint8_t* data, size_t length)
 {
   if (!ConfigManager::getInstance().getAllowTx())
   {
       Log::error(PSTR("TX disabled by config"));
       return -1;
   }
+  disableInterrupt();
 
   // send data
-  uint16_t state = 0;
+  int16_t state = 0;
   if (ConfigManager::getInstance().getBoardConfig().L_SX127X)
   {
     SX1278* l = (SX1278*)lora;
@@ -264,10 +269,11 @@ uint16_t Radio::sendTx(uint8_t* data, size_t length)
     l->startReceive();
   }
 
+  enableInterrupt();
   return state;
 }
 
-uint16_t Radio::sendTestPacket()
+int16_t Radio::sendTestPacket()
 {
   return sendTx((uint8_t*)TEST_STRING, strlen(TEST_STRING));
 }
@@ -312,7 +318,9 @@ uint8_t Radio::listen()
 
   size_t respLen = 0;
   uint8_t* respFrame = 0;
-  int state = 0;
+  int16_t state = 0;
+
+  PacketInfo newPacketInfo;
   status.lastPacketInfo.crc_error = 0;
   // read received data
   if (ConfigManager::getInstance().getBoardConfig().L_SX127X)
@@ -321,9 +329,9 @@ uint8_t Radio::listen()
     respLen = l->getPacketLength();
     respFrame = new uint8_t[respLen];
     state = l->readData(respFrame, respLen);
-    status.lastPacketInfo.rssi = l->getRSSI();
-    status.lastPacketInfo.snr = l->getSNR();
-    status.lastPacketInfo.frequencyerror = l->getFrequencyError();
+    newPacketInfo.rssi = l->getRSSI();
+    newPacketInfo.snr = l->getSNR();
+    newPacketInfo.frequencyerror = l->getFrequencyError();
   }
   else
   {
@@ -331,11 +339,25 @@ uint8_t Radio::listen()
     respLen = l->getPacketLength();
     respFrame = new uint8_t[respLen];
     state = l->readData(respFrame, respLen);
-    status.lastPacketInfo.rssi = l->getRSSI();
-    status.lastPacketInfo.snr = l->getSNR();
+    newPacketInfo.rssi = l->getRSSI();
+    newPacketInfo.snr = l->getSNR();
   }
 
-  if ((respLen > 0) && !(state == ERR_CRC_MISMATCH))
+  // check if the packet info is exactly the same as the last one
+  if (newPacketInfo.rssi == status.lastPacketInfo.rssi &&
+      newPacketInfo.snr == status.lastPacketInfo.snr &&
+      newPacketInfo.frequencyerror == status.lastPacketInfo.frequencyerror)
+  {
+    Log::console(PSTR("Interrupt triggered but no new data available. Check wiring and electrical interferences."));
+    delete[] respFrame;
+    return 4;
+  }
+
+  status.lastPacketInfo.rssi = newPacketInfo.rssi;
+  status.lastPacketInfo.snr = newPacketInfo.snr;
+  status.lastPacketInfo.frequencyerror = newPacketInfo.frequencyerror;
+
+  if (state == ERR_NONE)
   {
     // read optional data
     Log::console(PSTR("Packet (%u bytes):"), respLen);
@@ -346,26 +368,24 @@ uint8_t Radio::listen()
     }
     Log::console(PSTR("%s"), byteStr);
     delete[] byteStr;
-  }
 
-  if (state == ERR_NONE)
-  {
     status.lastPacketInfo.crc_error = false;
     String encoded = base64::encode(respFrame, respLen); 
-    MQTT_Client::getInstance().sendRx(encoded);
+    MQTT_Client::getInstance().sendRx(encoded, noisyInterrupt);
   }
   else if (state == ERR_CRC_MISMATCH) 
   {
     // packet was received, but is malformed
     status.lastPacketInfo.crc_error = true;
     String error_encoded = base64::encode("Error_CRC");
-    MQTT_Client::getInstance().sendRx(error_encoded);
+    MQTT_Client::getInstance().sendRx(error_encoded, noisyInterrupt);
   } 
 
   delete[] respFrame;
 
-  struct tm timeinfo;
-  if(!getLocalTime(&timeinfo))
+  struct tm* timeinfo;
+  time_t currenttime = time (NULL);
+  if(currenttime < 0)
   {
     Log::error(PSTR("Failed to obtain time"));
     status.lastPacketInfo.time = "";
@@ -373,14 +393,14 @@ uint8_t Radio::listen()
   else
   {
     // store time of the last packet received:
-    String thisTime="";
-    if (timeinfo.tm_hour < 10){ thisTime=thisTime + " ";} // add leading space if required
-    thisTime=String(timeinfo.tm_hour) + ":";
-    if (timeinfo.tm_min < 10){ thisTime=thisTime + "0";} // add leading zero if required
-    thisTime=thisTime + String(timeinfo.tm_min) + ":";
-    if (timeinfo.tm_sec < 10){ thisTime=thisTime + "0";} // add leading zero if required
-    thisTime=thisTime + String(timeinfo.tm_sec);
-    // const char* newTime = (const char*) thisTime.c_str();
+    timeinfo = localtime (&currenttime);
+    String thisTime = "";
+    if (timeinfo->tm_hour < 10){ thisTime=thisTime + " ";} // add leading space if required
+    thisTime = String (timeinfo->tm_hour) + ":";
+    if (timeinfo->tm_min < 10) { thisTime = thisTime + "0"; } // add leading zero if required
+    thisTime = thisTime + String (timeinfo->tm_min) + ":";
+    if (timeinfo->tm_sec < 10) { thisTime = thisTime + "0"; } // add leading zero if required
+    thisTime = thisTime + String (timeinfo->tm_sec);
     
     status.lastPacketInfo.time = thisTime;
   }
@@ -395,6 +415,7 @@ uint8_t Radio::listen()
   else
     ((SX1268*)lora)->startReceive();
 
+  noisyInterrupt = false;
   // we're ready to receive more packets,
   // enable interrupt service routine
   enableInterrupt();
@@ -406,13 +427,19 @@ uint8_t Radio::listen()
   else if (state == ERR_CRC_MISMATCH)
   {
     // packet was received, but is malformed
-    Log::console(PSTR("[SX12x8] CRC error!"));
+    Log::console(PSTR("[SX12x8] CRC error! Data cannot be retrieved"));
+    return 2;
+  }
+  else if (state == ERR_LORA_HEADER_DAMAGED)
+  {
+    // packet was received, but is malformed
+    Log::console(PSTR("[SX12x8] Damaged header! Data cannot be retrieved"));
     return 2;
   }
   else
   {
     // some other error occurred
-    Log::console(PSTR("[SX12x8] Failed, code %u"), state);
+    Log::console(PSTR("[SX12x8] Failed, code %d"), state);
     return 3;
   }
 }
@@ -425,7 +452,7 @@ void Radio::readState(int state)
   } 
   else
   {
-    Log::error(PSTR("failed, code %u"), state);
+    Log::error(PSTR("failed, code %d"), state);
     return;
   }
 }
@@ -676,7 +703,7 @@ int16_t Radio::remote_begin_lora(char* payload, size_t payload_len)
   sprintf(sw78StrHex, "%1x", syncWord78);
   sprintf(sw68StrHex, "%2x", syncWord68);
   Log::console(PSTR("Set Frequency: %.3f MHz\nSet bandwidth: %.3f MHz\nSet spreading factor: %u\nSet coding rate: %u\nSet sync Word 127x: 0x%s\nSet sync Word 126x: 0x%s"), freq, bw, sf, cr, sw78StrHex, sw68StrHex);
-  Log::console(PSTR("Set Power: %u\nSet C limit: %u\nSet Preamble: %u\nSet Gain: %u"), power, current_limit, preambleLength, gain);
+  Log::console(PSTR("Set Power: %d\nSet C limit: %u\nSet Preamble: %u\nSet Gain: %u"), power, current_limit, preambleLength, gain);
 
   int16_t state = 0;
   if (ConfigManager::getInstance().getBoardConfig().L_SX127X)
@@ -721,7 +748,7 @@ int16_t Radio::remote_begin_fsk(char* payload, size_t payload_len)
   uint16_t preambleLength = doc[6];
   uint8_t  ook = doc[7]; // 
 
-  Log::console(PSTR("Set Frequency: %.3f MHz\nSet bit rate: %.3f\nSet Frequency deviation: %.3f kHz\nSet receiver bandwidth: %.3f kHz\nSet Power: %u"), freq, br, freqDev, rxBw, power);
+  Log::console(PSTR("Set Frequency: %.3f MHz\nSet bit rate: %.3f\nSet Frequency deviation: %.3f kHz\nSet receiver bandwidth: %.3f kHz\nSet Power: %d"), freq, br, freqDev, rxBw, power);
   Log::console(PSTR("Set Current limit: %u\nSet Preamble Length: %u\nOOK Modulation %s\nSet datashaping %u"), currentlimit, preambleLength, (ook != 255) ? F("ON") : F("OFF"), ook);
 
   int16_t state = 0;
@@ -874,8 +901,8 @@ void Radio::remote_SPIwriteRegister(char* payload, size_t payload_len)
 
   if (ConfigManager::getInstance().getBoardConfig().L_SX127X)
     ((SX1278*)lora)->_mod->SPIwriteRegister(reg,data);
-  else
-    ((SX1268*)lora)->_mod->SPIwriteRegister(reg,data);
+//  else
+ //   ((SX1268*)lora)->_mod->SPIwriteRegister(reg,data);
 }
 
 int16_t Radio::remote_SPIreadRegister(char* payload, size_t payload_len)
@@ -886,8 +913,8 @@ int16_t Radio::remote_SPIreadRegister(char* payload, size_t payload_len)
   int16_t state = 0;
   if (ConfigManager::getInstance().getBoardConfig().L_SX127X)
     data = ((SX1278*)lora)->_mod->SPIreadRegister(reg);
-  else
-    data = ((SX1268*)lora)->_mod->SPIreadRegister(reg);
+ // else
+ //   data = ((SX1268*)lora)->_mod->SPIreadRegister(reg);
 
   Log::console(PSTR("REG ID: 0x%x HEX : 0x%x BIN : %b"), reg, data, data);
   
@@ -924,7 +951,7 @@ int16_t Radio::remote_SPIsetRegValue(char* payload, size_t payload_len)
   if (ConfigManager::getInstance().getBoardConfig().L_SX127X)
     state = ((SX1278*)lora)->_mod->SPIsetRegValue(reg, value, msb, lsb, checkinterval);
   else
-    state = ((SX1268*)lora)->_mod->SPIsetRegValue(reg, value, msb, lsb, checkinterval);
+ //   state = ((SX1268*)lora)->_mod->SPIsetRegValue(reg, value, msb, lsb, checkinterval);
   
   readState(state);
   return state;

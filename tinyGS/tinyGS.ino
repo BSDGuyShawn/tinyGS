@@ -147,6 +147,7 @@ void wifiConnected()
   NTP.settimeSyncThreshold (1000); // Sync only if calculated offset absolute value is greater than 1 ms
   NTP.setMaxNumSyncRetry (2); // 2 resync trials if accuracy not reached
   NTP.begin (ntpServer); // Start NTP client
+  Serial.printf ("NTP started");
   
   time_t startedSync = millis ();
   while (NTP.syncStatus() != syncd && millis() - startedSync < 5000) // Wait 5 seconds to get sync
@@ -234,7 +235,7 @@ void setup()
   if (configManager.isApMode())
     displayShowApMode();
   else 
-    displayShowStaMode();
+    displayShowStaMode(false);
   
   delay(500);  
 }
@@ -251,13 +252,11 @@ void loop() {
   static bool wasConnected = false;
   if (!configManager.isConnected())
   {
-    if (wasConnected)
-    {
-      if (configManager.isApMode())
-        displayShowApMode();
-      else 
-        displayShowStaMode();
-    }
+    if (configManager.isApMode() && wasConnected)
+      displayShowApMode();
+    else 
+      displayShowStaMode(configManager.isApMode());
+
     return;
   }
   wasConnected = true;
@@ -370,7 +369,7 @@ void switchTestmode()
   }
   else
   {
-      configManager.setTestMode(false);
+      configManager.setTestMode(true);
       Log::console(PSTR("Changed from normal mode to test mode"));
   }
 }
@@ -384,13 +383,16 @@ void switchLogLevel()
 
 void printLocalTime()
 {
-  struct tm timeinfo;
-  if(!getLocalTime(&timeinfo))
-  {
-    Log::error(PSTR("Failed to obtain time"));
-    return;
-  }
-  Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
+    time_t currenttime = time (NULL);
+    if (currenttime < 0) {
+        Log::error (PSTR ("Failed to obtain time: %d"), currenttime);
+        return;
+    }
+    struct tm* timeinfo;
+    
+    timeinfo = localtime (&currenttime);
+  
+  Serial.println(timeinfo, "%A, %B %d %Y %H:%M:%S");
 }
 
 // function to print controls

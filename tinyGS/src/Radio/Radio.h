@@ -69,6 +69,8 @@ public:
   uint16_t sendSatellitePacket();
 
   
+  int16_t sendTx(uint8_t* data, size_t length);
+  int16_t sendTestPacket();
    
 private:
   Radio();

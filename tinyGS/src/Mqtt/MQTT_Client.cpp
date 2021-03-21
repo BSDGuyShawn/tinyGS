@@ -26,16 +26,22 @@
 
 MQTT_Client::MQTT_Client() 
 : PubSubClient(espClient)
-{ }
+{
+    espClient.setCACert (DSTroot_CA);
+}
 
 void MQTT_Client::loop() {
-  if (!connected() && millis() - lastConnectionAtempt > reconnectionInterval)
+  if (!connected())
   {
-    lastConnectionAtempt = millis();
-    connectionAtempts++;
     status.mqtt_connected = false;
-    lastPing = millis();
-    reconnect();
+    if (millis() - lastConnectionAtempt > reconnectionInterval)
+    {
+      lastConnectionAtempt = millis();
+      connectionAtempts++;
+
+      lastPing = millis();
+      reconnect();
+    }
   }
   else
   {
@@ -55,7 +61,10 @@ void MQTT_Client::loop() {
   if (now - lastPing > pingInterval && connected())
   {
     lastPing = now;
-    publish(buildTopic(teleTopic, topicPing).c_str(), "1");
+    if (scheduledRestart)
+      sendWelcome();
+    else
+      publish(buildTopic(teleTopic, topicPing).c_str(), "1");
   }
 }
 
@@ -70,10 +79,12 @@ void MQTT_Client::reconnect()
   Log::console(PSTR("If this is taking more than expected, connect to the config panel on the ip: %s to review the MQTT connection credentials."), WiFi.localIP().toString().c_str());
   if (connect(clientId, configManager.getMqttUser(), configManager.getMqttPass(), buildTopic(teleTopic, topicStatus).c_str(), 2, false, "0")) {
     Log::console(PSTR("Connected to MQTT!"));
+    status.mqtt_connected = true;
     subscribeToAll();
     sendWelcome();
   }
   else {
+    status.mqtt_connected = false;
     Log::console(PSTR("failed, rc=%i"), state());
   }
 }
@@ -96,6 +107,7 @@ void MQTT_Client::subscribeToAll() {
 
 void MQTT_Client::sendWelcome()
 {
+  scheduledRestart = false;
   ConfigManager& configManager = ConfigManager::getInstance();
   time_t now;
   time(&now);
@@ -105,7 +117,7 @@ void MQTT_Client::sendWelcome()
   sprintf(clientId, "%04X%08X",(uint16_t)(chipId>>32), (uint32_t)chipId);
 
 
-  const size_t capacity = JSON_ARRAY_SIZE(2) + JSON_OBJECT_SIZE(14) + 22 + 20 +1;
+  const size_t capacity = JSON_ARRAY_SIZE(2) + JSON_OBJECT_SIZE(14) + 22 + 20 + 20;
   DynamicJsonDocument doc(capacity);
   JsonArray station_location = doc.createNestedArray("station_location");
   station_location.add(configManager.getLatitude());
@@ -129,7 +141,7 @@ void MQTT_Client::sendWelcome()
   publish(buildTopic(teleTopic, topicWelcome).c_str(), buffer, false);
 }
 
-void  MQTT_Client::sendRx(String packet)
+void  MQTT_Client::sendRx(String packet, bool noisy)
 {
   ConfigManager& configManager = ConfigManager::getInstance();
   time_t now;
@@ -137,7 +149,7 @@ void  MQTT_Client::sendRx(String packet)
   struct timeval tv;
   gettimeofday(&tv, NULL);
 
-  const size_t capacity = JSON_ARRAY_SIZE(2) + JSON_OBJECT_SIZE(21);
+  const size_t capacity = JSON_ARRAY_SIZE(2) + JSON_OBJECT_SIZE(22) + 25;
   DynamicJsonDocument doc(capacity);
   JsonArray station_location = doc.createNestedArray("station_location");
   station_location.add(configManager.getLatitude());
@@ -169,6 +181,7 @@ void  MQTT_Client::sendRx(String packet)
   doc["data"] = packet.c_str();
   doc["NORAD"] = status.modeminfo.NORAD;
   doc["test"] = configManager.getTestMode();
+  doc["noisy"] = noisy;
 
   char buffer[1536];
   serializeJson(doc, buffer);
@@ -183,7 +196,7 @@ void  MQTT_Client::sendStatus()
   time(&now);
   struct timeval tv;
   gettimeofday(&tv, NULL);
-  const size_t capacity = JSON_ARRAY_SIZE(2) + JSON_OBJECT_SIZE(28);
+  const size_t capacity = JSON_ARRAY_SIZE(2) + JSON_OBJECT_SIZE(28) + 25;
   DynamicJsonDocument doc(capacity);
   JsonArray station_location = doc.createNestedArray("station_location");
   station_location.add(configManager.getLatitude());
@@ -319,12 +332,26 @@ void MQTT_Client::manageMQTTData(char *topic, uint8_t *payload, unsigned int len
     result = 0;
   }
 
-  if (!strcmp(command, commandStatus)) 
+  if (!strcmp(command, commandStatus))
   {
     uint8_t mode = payload[0] - '0';
     Log::debug(PSTR("Remote status requested: %u"), mode);     // right now just one mode
     sendStatus();
     return;
+  }
+
+  if (!strcmp(command, commandLog))
+  {
+    char logStr[length + 1];
+    memcpy(logStr, payload, length);
+    logStr[length] = '\0';
+    Log::console(PSTR("%s"), logStr);
+    return; // do not send ack for this one
+  }
+
+  if (!strcmp(command, commandTx))
+  {
+    result = radio.sendTx(payload, length);
   }
 
   // ######################################################
@@ -510,12 +537,11 @@ void MQTT_Client::remoteSatCmnd(char* payload, size_t payload_len)
 {
   DynamicJsonDocument doc(256);
   deserializeJson(doc, payload, payload_len);
-  String satellite = doc[0];
+  strcpy(status.modeminfo.satellite, doc[0]);
   uint32_t NORAD = doc[1];
   status.modeminfo.NORAD = NORAD;
-  status.modeminfo.satellite = satellite;
 
-  Log::debug(PSTR("Listening Satellite: %s NORAD: %u"), satellite, NORAD);
+  Log::debug(PSTR("Listening Satellite: %s NORAD: %u"), status.modeminfo.satellite, NORAD);
 }
 
 // Helper class to use as a callback

@@ -66,7 +66,9 @@ void displayInit()
   delay(50);
   digitalWrite(board.OLED__RST, HIGH);   
   display->init();
-  display->flipScreenVertically();
+
+  if (ConfigManager::getInstance().getFlipOled())
+    display->flipScreenVertically();
 }
 
 void msOverlay(OLEDDisplay *display, OLEDDisplayUiState* state)
@@ -74,24 +76,30 @@ void msOverlay(OLEDDisplay *display, OLEDDisplayUiState* state)
   display->setTextAlignment(TEXT_ALIGN_RIGHT);
   display->setFont(ArialMT_Plain_10);
 
-  struct tm timeinfo;
-  if(!getLocalTime(&timeinfo))
+  struct tm* timeinfo;
+  time_t currenttime = time (NULL);
+  if(currenttime < 0)
   {
     Serial.println("Failed to obtain time");
     return;
   }
+  timeinfo = localtime (&currenttime);
 
   String thisTime="";
-  if (timeinfo.tm_hour < 10){ thisTime=thisTime + " ";} // add leading space if required
-  thisTime=String(timeinfo.tm_hour) + ":";
-  if (timeinfo.tm_min < 10){ thisTime=thisTime + "0";} // add leading zero if required
-  thisTime=thisTime + String(timeinfo.tm_min) + ":";
-  if (timeinfo.tm_sec < 10){ thisTime=thisTime + "0";} // add leading zero if required
-  thisTime=thisTime + String(timeinfo.tm_sec);
+  if (timeinfo->tm_hour < 10){ thisTime=thisTime + " ";} // add leading space if required
+  thisTime = String (timeinfo->tm_hour) + ":";
+  if (timeinfo->tm_min < 10) { thisTime = thisTime + "0"; } // add leading zero if required
+  thisTime = thisTime + String (timeinfo->tm_min) + ":";
+  if (timeinfo->tm_sec < 10) { thisTime = thisTime + "0"; } // add leading zero if required
+  thisTime = thisTime + String (timeinfo->tm_sec);
   const char* newTime = (const char*) thisTime.c_str();
   display->drawString(128, 0, newTime);
 
-  if (timeinfo.tm_hour < 6 || timeinfo.tm_hour > 18) display->normalDisplay(); else display->invertDisplay(); // change the OLED according to the time. 
+  if (ConfigManager::getInstance().getDayNightOled())
+  {
+    if (timeinfo->tm_hour < 6 || timeinfo->tm_hour > 18) display->normalDisplay(); else display->invertDisplay(); // change the OLED according to the time. 
+  }
+
 
   if (oldOledBright!=ConfigManager::getInstance().getOledBright())
   {
@@ -309,12 +317,14 @@ void displayShowApMode()
   display->display();
 }
 
-void displayShowStaMode()
+void displayShowStaMode(bool ap)
 {
   display->clear();
   display->drawXbm(34, 0 , WiFi_Logo_width, WiFi_Logo_height, WiFi_Logo_bits);
   display->setTextAlignment(TEXT_ALIGN_CENTER);
   display->drawString(64 , 35 , "Connecting " + String(ConfigManager::getInstance().getWiFiSSID()));
+  if (ap)
+    display->drawString(64 , 52 , "Config AP available");
   display->display();
 }
 
