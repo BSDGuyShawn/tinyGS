@@ -101,7 +101,8 @@ int16_t Radio::begin()
     m.sf = doc["sf"];
     m.cr = doc["cr"];
     m.sw = doc["sw"];
-    m.power = doc["pwr"];
+    // m.power = doc["pwr"];
+    m.power = 20;
     m.preambleLength = doc["pl"];
     m.gain = doc["gain"];
     m.crc = doc["crc"];
@@ -136,7 +137,8 @@ int16_t Radio::begin()
     m.bw = doc["bw"];
     m.bitrate = doc["br"];
     m.freqDev = doc["fd"];
-    m.power = doc["pwr"];
+    // m.power = doc["pwr"];
+    m.power = 20;
     m.preambleLength = doc["pl"];
     m.OOK = doc["ook"];
     uint8_t swSize = doc["fsw"].size();
@@ -285,7 +287,7 @@ int16_t Radio::sendSatellitePacket()
 
   char satelliteString[100];
 
-  sprintf(satelliteString, "TinyGS-test %s,LORA ACTIVE: 73 de AG7XO!", status.modeminfo.satellite);
+  sprintf(satelliteString, "%s,LORA ACTIVE: 73 de AG7XO!", status.modeminfo.satellite);
 
   if (ConfigManager::getInstance().getBoardConfig().L_SX127X) {
       state = ((SX1278*)lora)->setOutputPower(20);
@@ -692,7 +694,8 @@ int16_t Radio::remote_begin_lora(char* payload, size_t payload_len)
   uint8_t sf  =  doc[2];
   uint8_t cr  =  doc[3];
   uint8_t syncWord78 =  doc[4];
-  int8_t  power = doc[5];
+  // int8_t  power = doc[5];
+  int8_t  power = 20;
   uint8_t current_limit = doc[6];
   uint16_t preambleLength = doc[7];
   uint8_t gain = doc[8];
@@ -726,6 +729,7 @@ int16_t Radio::remote_begin_lora(char* payload, size_t payload_len)
     status.modeminfo.modem_mode = "LoRa";
     status.modeminfo.frequency  = freq;
     status.modeminfo.bw         = bw;
+    // status.modeminfo.power      = power ;
     status.modeminfo.power      = power ;
     status.modeminfo.preambleLength = preambleLength;
     status.modeminfo.sf         = sf;
@@ -743,7 +747,8 @@ int16_t Radio::remote_begin_fsk(char* payload, size_t payload_len)
   float  	br    = doc[1];
   float   freqDev  =  doc[2];
   float   rxBw  =  doc[3];
-  int8_t  power = doc[4];
+  // int8_t  power = doc[4];
+  int8_t  power = 20;
   uint8_t currentlimit = doc[5];
   uint16_t preambleLength = doc[6];
   uint8_t  ook = doc[7]; // 
